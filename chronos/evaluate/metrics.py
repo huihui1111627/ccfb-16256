@@ -67,9 +67,11 @@ class Epoch:
         self.names = meta["node_names"]
         self.upstream_of = [list(u) for u in meta["upstream_of"]]
         # 每个故障的精确影响掩码 (仿真器直接产出, 比启发式更可信)
-        self.masks: Dict[str, np.ndarray] = {
-            k[len("mask__"):]: v for k, v in truth.items() if k.startswith("mask__")
-        }
+        # 兼容两种 key: 内存里是 "<kind>@<idx>", 落盘后被 sanitize 成 "<kind>_<idx>"
+        self.masks: Dict[str, np.ndarray] = {}
+        for k, v in truth.items():
+            if k.startswith("mask__"):
+                self.masks[k[len("mask__"):]] = v
 
     def th_ms(self, i: int) -> float:
         t = self.tier[i]
@@ -101,6 +103,7 @@ class Epoch:
             mk = self.masks[key]
             roots = np.where((mk if use_full_mask else mk[:, a:b]).any(axis=1))[0]
         else:
+            mk = None
             roots = np.arange(N)
         downstream = self._downstream(set(int(r) for r in roots)) if f["kind"] in (
             "upstream_bad", "relay_orphan") else set(int(r) for r in roots)
@@ -110,10 +113,9 @@ class Epoch:
         out = set()
         for i in downstream:
             need = max(self.th_ms(i) / 1000.0 * 1.5, mag_floor)
-            if use_full_mask:
+            if use_full_mask and mk is not None:
                 # 本机类: 在掩码命中的任一时刻越限即可 (窗口边界不可靠)
-                mask_i = mk[i]
-                hit = (np.abs(self.true_off[i]) > need) & mask_i
+                hit = (np.abs(self.true_off[i]) > need) & mk[i]
                 if hit.any():
                     out.add(i)
             elif (seg[i] > need).any():
@@ -151,11 +153,18 @@ class Epoch:
         return seen
 
     def _mask_key(self, f: dict) -> Optional[str]:
-        # 掩码 key 形如 "<kind>_<index>"
+        # 优先用仿真器给的原始 key (内存里 "<kind>@<idx>"); 落盘版用 "<kind>_<idx>"
+        k = f.get("key")
+        if k is not None and k in self.masks:
+            return k
         idx = f.get("_idx")
         if idx is None:
             return None
-        return f"{f['kind']}_{idx}"
+        cand = [f"{f['kind']}@{idx}", f"{f['kind']}_{idx}"]
+        for c in cand:
+            if c in self.masks:
+                return c
+        return cand[0]
 
     def exact_cause(self, i: int) -> Optional[str]:
         """节点 i 的真实主因: 取 "因果覆盖且窗内确实越限" 的故障中幅度最大者。"""
@@ -191,6 +200,22 @@ class Epoch:
         for f in self.fault_meta:
             s |= self.affected_by_fault(f)
         return s
+
+
+def _explained_by_upstream(node: int, onset_s: float, gt_cands: List[dict],
+                           names: List[str], upstream_of: List[List[int]]) -> Optional[str]:
+    """node 在该时刻的异常, 是否可由其某个上游链上的真值故障解释。"""
+    for f in gt_cands:
+        if abs(f["start_s"] - onset_s) > 8 * 3600:
+            continue
+        # 找到该故障对应的节点下标
+        try:
+            src = names.index(f["target"])
+        except ValueError:
+            continue
+        if _reachable(src, node, upstream_of):
+            return f["target"]
+    return None
 
 
 def _reachable(src: int, dst: int, upstream_of: List[List[int]]) -> bool:
@@ -258,43 +283,46 @@ def evaluate(ar: AnalysisResult, truth: dict) -> EvalResult:
         st["accuracy"] = round(st["correct"] / max(1, st["n"]), 4)
     cause_acc = correct / max(1, len(true_bad))
 
-    # 上游故障定位
+    # 上游故障定位: 预测事件与真值事件做贪心一对一匹配 (同名的按时间最近)
     up_eval = []
-    for inc in ar.upstream_incidents:
-        # 找真值里对应的上游故障
+    gt_used = set()
+    gt_cands = [f for f in ep.fault_meta if f["kind"] in ("upstream_bad", "relay_orphan")]
+    for inc in sorted(ar.upstream_incidents, key=lambda u: u.onset_s):
+        cands = [f for f in gt_cands if f["target"] == inc.name and id(f) not in gt_used]
         gt = None
-        for f in ep.fault_meta:
-            if f["kind"] in ("upstream_bad", "relay_orphan") and f["target"] == inc.name:
-                gt = f
-                break
+        if cands:
+            nearest = min(cands, key=lambda f: abs(f["start_s"] - inc.onset_s))
+            # 只有时间窗口吻合 (6h 内) 才算匹配到该真值事件
+            if abs(nearest["start_s"] - inc.onset_s) < 6 * 3600:
+                gt = nearest
         if gt is None:
-            up_eval.append({"name": inc.name, "matched_ground_truth": False,
+            # 该 culprit 无独立真值故障: 若它其实是另一个上游故障的传播
+            # (其上游链上有正在出错的真值故障, 且时间吻合), 记为 "传播"。
+            propagated = _explained_by_upstream(inc.culprit, inc.onset_s, gt_cands,
+                                                ep.names, ep.upstream_of)
+            up_eval.append({"name": inc.name,
+                            "matched_ground_truth": False,
+                            "explained_by": propagated,
                             "affected": len(inc.affected)})
             continue
-        # 真值: 用与 affected_by_fault 相同的因果 + 量级口径
+        gt_used.add(id(gt))
         gt_affected = ep.affected_by_fault(gt) - {inc.culprit}
         pred_set = set(inc.affected)
         tp2 = len(pred_set & gt_affected)
         prec2 = tp2 / max(1, len(pred_set))
         rec2 = tp2 / max(1, len(gt_affected))
-        latency = inc.detection_latency_s
         up_eval.append({
             "name": inc.name, "matched_ground_truth": True,
             "onset_iso_s": round(inc.onset_s, 1),
             "gt_start_iso_s": round(gt["start_s"], 1),
-            "latency_s": round(latency, 1),
             "onset_error_s": round(inc.onset_s - gt["start_s"], 1),
             "affected_pred": len(pred_set), "affected_gt": len(gt_affected),
             "affected_precision": round(prec2, 4), "affected_recall": round(rec2, 4),
             "detected_as_culprit": True,
         })
-    # 真值上游故障是否都至少被认出一个 culprit
-    gt_up = [f for f in ep.fault_meta if f["kind"] in ("upstream_bad", "relay_orphan")]
-    detected_names = {u["name"] for u in up_eval if u.get("matched_ground_truth")}
-    missed = [f["target"] for f in gt_up if f["target"] not in detected_names]
-    for f in gt_up:
-        pass
-    up_eval.append({"missed_ground_truth": missed}) if missed else None
+    missed = [f["target"] for f in gt_cands if id(f) not in gt_used]
+    if missed:
+        up_eval.append({"missed_ground_truth": missed})
 
     # 网络事件匹配
     net_match = []

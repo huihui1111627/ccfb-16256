@@ -168,6 +168,9 @@ def analyze(tel: dict, min_run_s: float = 1200.0, sigma_mult: float = 6.0,
         np.maximum(baseline[:, None] + sigma_mult * sigma[:, None],
                    np.full((N, T), abs_floor_ms)))
     bad = (np.abs(dev) > limit) & (~scheduled)
+    # 开局宽限: 前 1 小时是采集/收敛热身, 不判故障 (真实监控同样如此)
+    grace = max(1, int(3600 / dt))
+    bad[:, :grace] = False
     # 最短连续窗口
     min_len = max(1, int(round(min_run_s / dt)))
     bad_clean = _episode_filter(bad, min_len)
@@ -357,10 +360,18 @@ def _attribute(i, dev, bad, net_bad, up_sets, children, sib_cache,
     return "unknown", None, 0.3, ev, "", first_win
 
 
-def _detect_upstream_incidents(dev, bad, findings, children, names, times_s):
+def _detect_upstream_incidents(dev, bad, findings, children, names, times_s,
+                               gap_s: float = 3 * 3600):
+    """按 (culprit, 连续时间段) 拆分事件: 同一台上游在不同时间段的两次故障
+    (如先被 ntfp-c 带偏、后来又自己失联) 应各算一次事件。"""
     out: List[UpstreamIncident] = []
     by_idx = {f.idx: f for f in findings}
     N = len(names)
+    T = bad.shape[1]
+    if T > 1:
+        gap = max(1, int(gap_s / max(1.0, times_s[1] - times_s[0])))
+    else:
+        gap = 1
     for j in range(N):
         kids = children[j]
         if not kids:
@@ -369,29 +380,46 @@ def _detect_upstream_incidents(dev, bad, findings, children, names, times_s):
         self_bad = bad[j]
         if len(followers) < 2 and not (self_bad.any() and len(followers) >= 1):
             continue
-        onsets = [by_idx[k].onset_s for k in followers if by_idx[k].onset_s is not None]
+        # 把 followers 的坏窗口 + 自身坏窗口收集为时间区间, 合并成 <gap 的簇
+        intervals = []
+        for k in followers:
+            intervals.extend(episodes(bad[k], min_len=1))
         if self_bad.any():
-            onsets.append(float(times_s[int(np.flatnonzero(self_bad)[0])]))
-        onset = min(onsets) if onsets else float(times_s[0])
-        peaks = [by_idx[k].peak_ms for k in followers]
-        if self_bad.any():
-            peaks.append(abs(float(np.nanmax(dev[j][self_bad]))))
-        peak = max(peaks) if peaks else 0.0
-        dir_vals = [np.nanmedian(dev[k][bad[k]]) for k in followers if bad[k].any()]
-        if self_bad.any():
-            dir_vals.append(np.nanmedian(dev[j][self_bad]))
-        direction = float(np.sign(np.median(dir_vals))) if dir_vals else 0.0
-        protected = len(kids) - len(followers)
-        ev = [f"上游 {names[j]} 直连下游 {len(kids)} 台, 其中 {len(followers)} 台同向偏"]
-        if self_bad.any():
-            ev.append(f"{names[j]} 自身偏差峰 {abs(float(np.nanmax(dev[j][self_bad]))):.0f}ms")
-        if protected > 0:
-            ev.append(f"{protected} 台因多数表决/冗余未被带偏")
-        conf = min(0.99, 0.5 + 0.5 * (len(followers) / max(1, len(kids))))
-        out.append(UpstreamIncident(
-            culprit=j, name=names[j], onset_s=onset, detected_s=onset,
-            peak_ms=peak, direction=direction, direct_children=len(kids),
-            affected=sorted(followers), protected=protected, confidence=conf, evidence=ev))
+            intervals.extend(episodes(self_bad, min_len=1))
+        if not intervals:
+            continue
+        intervals.sort()
+        clusters = [list(intervals[0])]
+        for a, b in intervals[1:]:
+            if a - clusters[-1][1] <= gap:
+                clusters[-1][1] = max(clusters[-1][1], b)
+            else:
+                clusters.append([a, b])
+        for (ca, cb) in clusters:
+            seg_f = [k for k in followers if bad[k, ca:cb].any()]
+            seg_self = bool(self_bad[ca:cb].any())
+            if len(seg_f) < 2 and not (seg_self and len(seg_f) >= 1):
+                continue
+            onset = float(times_s[ca])
+            peaks = [by_idx[k].peak_ms for k in seg_f]
+            if seg_self:
+                peaks.append(abs(float(np.nanmax(dev[j, ca:cb]))))
+            peak = max(peaks) if peaks else 0.0
+            dir_vals = [np.nanmedian(dev[k, ca:cb][bad[k, ca:cb]]) for k in seg_f if bad[k, ca:cb].any()]
+            if seg_self:
+                dir_vals.append(np.nanmedian(dev[j, ca:cb][self_bad[ca:cb]]))
+            direction = float(np.sign(np.median(dir_vals))) if dir_vals else 0.0
+            protected = len(kids) - len(seg_f)
+            ev = [f"上游 {names[j]} 直连下游 {len(kids)} 台, 本时段 {len(seg_f)} 台同向偏"]
+            if seg_self:
+                ev.append(f"{names[j]} 自身偏差峰 {abs(float(np.nanmax(dev[j, ca:cb]))):.0f}ms")
+            if protected > 0:
+                ev.append(f"{protected} 台因多数表决/冗余未被带偏")
+            conf = min(0.99, 0.5 + 0.5 * (len(seg_f) / max(1, len(kids))))
+            out.append(UpstreamIncident(
+                culprit=j, name=names[j], onset_s=onset, detected_s=onset,
+                peak_ms=peak, direction=direction, direct_children=len(kids),
+                affected=sorted(seg_f), protected=protected, confidence=conf, evidence=ev))
     out.sort(key=lambda x: -x.peak_ms)
     return out
 

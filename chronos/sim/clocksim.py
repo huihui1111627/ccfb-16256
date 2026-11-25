@@ -283,8 +283,9 @@ def simulate(sc: Scenario, seed: Optional[int] = None, verbose: bool = False) ->
                            "note": f.note, "params": f.params, "_idx": fi})
 
     # ---- 状态
-    off = np.zeros(N)
-    # stratum-1 用 OU 稳态初始化
+    # strat-1 用 OU 稳态初始化; 其余节点也先取一个 ≤ 数十 ms 的随机初偏,
+    # 避免 "全部从 0 出发" 造成的开局瞬态被误认为故障。
+    off = r.normal(0, 0.5e-3, N)
     off[is_stratum1] = r.normal(0, np.maximum(ref_q[is_stratum1], 1e-6))
 
     # 记录缓冲
@@ -364,7 +365,9 @@ def simulate(sc: Scenario, seed: Optional[int] = None, verbose: bool = False) ->
             got = got & usable[uidx]
             # 中位数多数表决 (falseticker 剔除): 只有落在中位数附近的多数的才参与合成
             mf = np.where(got, m, np.nan)
-            with np.errstate(all="ignore"):
+            import warnings as _w
+            with _w.catch_warnings(), np.errstate(all="ignore"):
+                _w.simplefilter("ignore", RuntimeWarning)
                 med = np.nanmedian(mf, axis=1)
             inl = got & (np.abs(m - np.nan_to_num(med)[:, None]) <= MEDIAN_TOL_S)
             ninl = inl.sum(axis=1)
@@ -372,7 +375,8 @@ def simulate(sc: Scenario, seed: Optional[int] = None, verbose: bool = False) ->
             # NTP 交叉算法: 只有当 被剔除者 < 有效数的一半 时才算收敛, 否则判定为 "无多数" holdover。
             outliers = nval - ninl
             ok_sync = (nval >= 1) & (outliers < (nval + 1) // 2) & np.isfinite(med)
-            with np.errstate(all="ignore"):
+            with _w.catch_warnings(), np.errstate(all="ignore"):
+                _w.simplefilter("ignore", RuntimeWarning)
                 combined = np.nanmedian(np.where(inl, m, np.nan), axis=1)
             # 选中 "最接近合成值" 的上游, 仅用于展示/诊断
             scol = np.where(got, np.abs(m - np.nan_to_num(combined)[:, None]), np.inf)

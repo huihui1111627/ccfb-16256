@@ -295,9 +295,8 @@ def _recommend(matrix: dict, mixed: dict) -> dict:
     # 绝不混用 step 与 smear。
     worst = mixed.get("worst_pair", {})
     return {
-        "primary": "全机群统一使用 smear (24h 抹平) 或统一 slew (1h), 不得混用",
+        "primary": "smear (24h 抹平) 或 slew (1h) 二选一在全机群统一",
         "why": ("step 会造成时间倒退与跨机 1s 跳变, 是租约/编号/日志排序故障的直接原因; "
                 "slew/smear 单调无倒退, 但抹平窗口内与外部 UTC 偏离, 需与外部对齐的系统 (如证书/计费) 用较短 slew"),
-        "must_not_mix": f"step 与 smear 混用会让两组机器在抹平窗口内长期相差约 {worst.get('max_abs_diff_s', 1.0)}s",
-        "alignment": "对账/计费/证书等需真 UTC 的服务: slew 1h 且闰秒后 1h 内避免跨机强依赖",
+        "must_not_mix": f"step 与 smear 混用会让两组机器在抹平窗口内长期相差约 {worst.get('max_abs_diff_s', 1.0)}s",        "alignment": "对账/计费/证书等需真 UTC 的服务: slew 1h 且闰秒后 1h 内避免跨机强依赖",
     }

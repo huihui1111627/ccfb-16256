@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chronos · 机群对时巡检与推演</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#131823; --panel2:#1a2130; --line:#263041;
+    --fg:#dbe3f0; --dim:#8b97ab; --accent:#4aa8ff; --good:#3ecf8e;
+    --warn:#f5b83d; --bad:#ff6b6b; --crit:#ff3d71;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:18px;background:linear-gradient(180deg,#141a26,#0b0e14)}
+  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.5px}
+  header .tag{font-size:11px;color:var(--dim);border:1px solid var(--line);
+    padding:2px 8px;border-radius:10px}
+  .stats{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
+  .stat{text-align:right}
+  .stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+  .stat .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+  nav{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--line);
+    background:var(--panel);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+  nav button{background:none;border:none;color:var(--dim);padding:11px 16px;
+    cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+  nav button:hover{color:var(--fg)}
+  nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  main{padding:20px 22px;max-width:1500px;margin:0 auto}
+  section{display:none}
+  section.active{display:block;animation:fade .18s}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  .grid{display:grid;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h3{margin:0 0 12px;font-size:13px;font-weight:600;color:var(--fg);
+    display:flex;align-items:center;gap:8px}
+  .card h3 .hint{font-weight:400;color:var(--dim);font-size:11px}
+  canvas{display:block;width:100%}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--dim);margin-top:8px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  tr:hover td{background:var(--panel2)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:500}
+  .p-ok{background:rgba(62,207,142,.15);color:var(--good)}
+  .p-local{background:rgba(245,184,61,.16);color:var(--warn)}
+  .p-upstream{background:rgba(255,107,107,.16);color:var(--bad)}
+  .p-network{background:rgba(74,168,255,.16);color:var(--accent)}
+  .p-unknown{background:rgba(139,151,171,.16);color:var(--dim)}
+  .p-critical{background:rgba(255,61,113,.18);color:var(--crit)}
+  .p-high{background:rgba(255,107,107,.16);color:var(--bad)}
+  .p-medium{background:rgba(245,184,61,.16);color:var(--warn)}
+  .p-low{background:rgba(74,168,255,.16);color:var(--accent)}
+  .p-slew,.p-smear,.p-step{background:rgba(74,168,255,.16);color:var(--accent)}
+  .muted{color:var(--dim)}
+  .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .kpi .v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}
+  .kpi .k{font-size:11px;color:var(--dim);margin-top:2px}
+  .kpi.good .v{color:var(--good)} .kpi.warn .v{color:var(--warn)} .kpi.bad .v{color:var(--bad)}
+  .banner{border:1px solid var(--line);border-left:3px solid var(--accent);
+    background:var(--panel);border-radius:8px;padding:11px 14px;margin-bottom:16px;font-size:12px;color:var(--dim)}
+  .banner b{color:var(--fg)}
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.cols2{grid-template-columns:1fr}}
+  .tooltip{position:fixed;pointer-events:none;background:#000c;border:1px solid var(--line);
+    padding:6px 9px;border-radius:6px;font-size:11px;z-index:100;display:none;max-width:340px;line-height:1.5}
+  a.link{color:var(--accent);cursor:pointer;text-decoration:none}
+  .bar{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;min-width:60px}
+  .bar>i{display:block;height:100%}
+  .scroll{max-height:520px;overflow:auto}
+  details summary{cursor:pointer;color:var(--accent);font-size:12px}
+  .ev{font-size:11px;color:var(--dim);margin:2px 0 2px 12px}
+  .sev-ok{color:var(--good)} .sev-low{color:var(--accent)} .sev-medium{color:var(--warn)}
+  .sev-high{color:var(--bad)} .sev-critical{color:var(--crit)}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>chronos</h1>
+  <span class="tag">机群对时巡检与推演</span>
+  <div class="stats" id="hdr-stats"></div>
+</header>
+<nav id="nav">
+  <button data-tab="overview" class="active">总览</button>
+  <button data-tab="heat">偏差热力图</button>
+  <button data-tab="hierarchy">服务器层级</button>
+  <button data-tab="incidents">故障与归因</button>
+  <button data-tab="leap">闰秒推演</button>
+  <button data-tab="scan">代码扫描</button>
+  <button data-tab="advice">配置建议</button>
+  <button data-tab="eval">评测</button>
+</nav>
+<main>
+  <section id="tab-overview" class="active"></section>
+  <section id="tab-heat"></section>
+  <section id="tab-hierarchy"></section>
+  <section id="tab-incidents"></section>
+  <section id="tab-leap"></section>
+  <section id="tab-scan"></section>
+  <section id="tab-advice"></section>
+  <section id="tab-eval"></section>
+</main>
+<div class="tooltip" id="tip"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
