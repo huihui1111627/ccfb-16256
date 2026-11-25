@@ -6,12 +6,9 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
-from typing import Optional
 
 import numpy as np
 
-from ..util import UTC
 from .clocksim import SimResult, simulate
 from .scenario import Scenario, default_scenario
 

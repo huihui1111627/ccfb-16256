@@ -16,12 +16,12 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Set
 
 import numpy as np
 
-from ..sim.scenario import BUSINESS_TIERS, TIER_ORDER
+from ..sim.scenario import BUSINESS_TIERS
 
 
 # ---------------------------------------------------------------- 拓扑建议

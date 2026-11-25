@@ -4,15 +4,13 @@
 """
 from __future__ import annotations
 
-import os
-from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Optional
 
 import numpy as np
 
 from ..analysis.attribution import AnalysisResult, analyze, summary
 from ..advise.advisor import build_advice
-from ..evaluate.metrics import Epoch, evaluate
+from ..evaluate.metrics import evaluate
 from ..evaluate.scanner_eval import evaluate_scan
 from ..leap.impact import build_checklist
 from ..leap.policies import build_curves, curve_metrics, mixed_fleet_summary, DEFAULT_WINDOW, MODE_LABEL

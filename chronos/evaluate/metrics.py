@@ -20,12 +20,11 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
-from ..analysis.attribution import AnalysisResult, tier_threshold_ms
+from ..analysis.attribution import AnalysisResult
 from ..sim.scenario import BUSINESS_TIERS
 
 
 def _rel(t: str) -> float:
-    from ..util import parse_utc
     return 0.0 if not t else 0.0
 
 
@@ -250,20 +249,22 @@ def _kind_to_cause(kind: str) -> Optional[str]:
 def evaluate(ar: AnalysisResult, truth: dict) -> EvalResult:
     meta = ar.meta
     ep = Epoch(truth, {**meta, "_times_s": ar.times_s.tolist()})
-    n = len(ar.findings)
     pred_bad = {f.idx for f in ar.findings if f.cause in ("local", "upstream", "network", "unknown")}
     true_bad = ep.all_faulted()
 
     tp = len(pred_bad & true_bad)
     fp = pred_bad - true_bad
     fn = true_bad - pred_bad
-    prec = tp / max(1, tp + len(fp))
-    rec = tp / max(1, tp + len(fn))
-    f1 = 2 * prec * rec / max(1e-9, prec + rec)
+    # 精确率为 0 却有预测 = 全是误报; 无预测时定义 N/A (用 nan 表示)
+    prec = tp / (tp + len(fp)) if (tp + len(fp)) else (float("nan") if len(true_bad) == 0 else 1.0)
+    rec = tp / (tp + len(fn)) if (tp + len(fn)) else float("nan")
+    f1 = 2 * prec * rec / (prec + rec) if (prec == prec and rec == rec and prec + rec) else float("nan")
     fault_eval = {
         "n_true": len(true_bad), "n_pred": len(pred_bad),
         "tp": tp, "fp": len(fp), "fn": len(fn),
-        "precision": round(prec, 4), "recall": round(rec, 4), "f1": round(f1, 4),
+        "precision": None if prec != prec else round(prec, 4),
+        "recall": None if rec != rec else round(rec, 4),
+        "f1": None if f1 != f1 else round(f1, 4),
     }
 
     # 归因: 只对真值受影响机器

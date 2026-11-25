@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..util import rng
-from .scenario import Fault, LeapPolicy, Scenario
+from .scenario import LeapPolicy, Scenario
 
 STEP_THR_S = 0.128          # ntpd 默认 step 阈值
 MAX_SLEW = 500e-6           # 最大 slew 速率 500ppm
@@ -329,13 +329,11 @@ def simulate(sc: Scenario, seed: Optional[int] = None, verbose: bool = False) ->
             jmult_l = cong_tab[rc, t, 1]
             ladd_l = cong_tab[rc, t, 2]
             aadd_l = cong_tab[rc, t, 3]
-            link_is_cong = link_rcode >= 0
         else:
             dmult_l = np.ones_like(lk_delay)
             jmult_l = np.ones_like(lk_delay)
             ladd_l = np.zeros_like(lk_delay)
             aadd_l = np.zeros_like(lk_delay)
-            link_is_cong = np.zeros_like(lk_delay, dtype=bool)
         # 4) 测量
         valid = up_idx >= 0
         has = np.zeros(N, dtype=bool)

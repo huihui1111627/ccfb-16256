@@ -20,12 +20,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from ..sim.scenario import BUSINESS_TIERS
-from ..util import episodes, fmt_utc, robust_sigma
+from ..util import episodes, fmt_utc
 
 
 @dataclass
@@ -133,7 +133,6 @@ def analyze(tel: dict, min_run_s: float = 1200.0, sigma_mult: float = 6.0,
     jitter = np.asarray(tel["jitter_ms"], dtype=np.float64)
     loss = np.asarray(tel["loss_pct"], dtype=np.float64)
     reach = np.asarray(tel["reach"], dtype=np.float64)
-    peer = np.asarray(tel["peer_idx"])
     names = meta["node_names"]
     tier = meta["node_tier"]
     region = meta["node_region"]
@@ -158,9 +157,13 @@ def analyze(tel: dict, min_run_s: float = 1200.0, sigma_mult: float = 6.0,
     ok_samples = ~scheduled[0] if scheduled.any() else np.ones(T, dtype=bool)
     if not ok_samples.any():
         ok_samples = np.ones(T, dtype=bool)
-    base_dev = dev[:, ok_samples]
-    baseline = np.nanmedian(dev, axis=1)
-    sigma = 1.4826 * np.nanmedian(np.abs(dev - baseline[:, None]), axis=1)
+    import warnings as _w
+    with _w.catch_warnings(), np.errstate(all="ignore"):
+        _w.simplefilter("ignore", RuntimeWarning)
+        baseline = np.nanmedian(dev, axis=1)
+        sigma = 1.4826 * np.nanmedian(np.abs(dev - baseline[:, None]), axis=1)
+    baseline = np.where(np.isfinite(baseline), baseline, 0.0)
+    sigma = np.where(np.isfinite(sigma), sigma, 0.3)
     sigma = np.maximum(sigma, 0.3)
 
     limit = np.maximum(
@@ -241,8 +244,11 @@ def _network_bad(delay, jitter, loss, reach, region, dev, dt) -> np.ndarray:
         ridx = np.array([j for j in range(N) if region[j] == rg])
         if ridx.size == 0:
             continue
-        d_base[ridx] = np.nanmedian(delay[ridx], axis=1)
-        j_base[ridx] = np.nanmedian(jitter[ridx], axis=1)
+        import warnings as _w
+        with _w.catch_warnings(), np.errstate(all="ignore"):
+            _w.simplefilter("ignore", RuntimeWarning)
+            d_base[ridx] = np.nanmedian(delay[ridx], axis=1)
+            j_base[ridx] = np.nanmedian(jitter[ridx], axis=1)
         l_base[ridx] = np.nanmedian(loss[ridx], axis=1)
     d_base = np.maximum(d_base, 0.5)
     j_base = np.maximum(j_base, 0.03)
@@ -259,7 +265,6 @@ def _network_bad(delay, jitter, loss, reach, region, dev, dt) -> np.ndarray:
 
 def _sibling_summary(dev, bad, children, times_s):
     """缓存每节点的兄弟列表与其 '共因强度'。"""
-    N = dev.shape[0]
     return {"children": children}
 
 
@@ -363,11 +368,11 @@ def _attribute(i, dev, bad, net_bad, up_sets, children, sib_cache,
 def _detect_upstream_incidents(dev, bad, findings, children, names, times_s,
                                gap_s: float = 3 * 3600):
     """按 (culprit, 连续时间段) 拆分事件: 同一台上游在不同时间段的两次故障
-    (如先被 ntfp-c 带偏、后来又自己失联) 应各算一次事件。"""
+    (如先被 ntp-c 带偏、后来又自己失联) 应各算一次事件。"""
     out: List[UpstreamIncident] = []
     by_idx = {f.idx: f for f in findings}
-    N = len(names)
     T = bad.shape[1]
+    N = len(names)
     if T > 1:
         gap = max(1, int(gap_s / max(1.0, times_s[1] - times_s[0])))
     else:

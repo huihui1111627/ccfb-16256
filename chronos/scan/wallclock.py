@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import ast
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 WALL_FUNCS = {
@@ -314,7 +314,6 @@ class FuncVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _check_id_assign(self, node: ast.Assign):
-        depth = 0
         tgt_names = [t.id.lower() for t in node.targets if isinstance(t, ast.Name)]
         if not any(any(k in t for k in ("id", "seq", "uid", "token", "snowflake", "orderno", "order_no"))
                    for t in tgt_names):
@@ -333,8 +332,7 @@ class FuncVisitor(ast.NodeVisitor):
                     break
 
     def visit_Call(self, node: ast.Call):
-        fq = self._fqn(node.func) or ""
-        # time.sleep / datetime.now 在参数里
+        # 参数里的墙钟调用由外层的 _expr_is_wall 覆盖
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name):

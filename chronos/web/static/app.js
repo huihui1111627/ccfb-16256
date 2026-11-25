@@ -3,6 +3,7 @@ const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const tip = $("#tip");
 const fmt = (n, d=1) => (n==null||isNaN(n)) ? "—" : Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
+const pctv = (v, d=1) => (v==null||isNaN(v)) ? "—" : (v*100).toFixed(d)+"%";
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function fmtDur(s){
@@ -60,9 +61,9 @@ async function renderOverview(){
       采集 ${o.days} 天, 每 ${o.base_dt/60} 分钟一点 · 闰秒 @ ${esc(o.leap_when||"—")}
     </div>
     <div class="kpi-row">
-      <div class="kpi good"><div class="v">${fmt(fd.recall*100,1)}%</div><div class="k">故障机器召回</div></div>
-      <div class="kpi ${fd.precision>0.8?'good':fd.precision>0.6?'warn':'bad'}"><div class="v">${fmt(fd.precision*100,1)}%</div><div class="k">故障机器精确率</div></div>
-      <div class="kpi good"><div class="v">${fmt(e.cause_accuracy*100,1)}%</div><div class="k">根因归因准确率</div></div>
+      <div class="kpi good"><div class="v">${pctv(fd.recall)}</div><div class="k">故障机器召回</div></div>
+      <div class="kpi ${(fd.precision==null?'':fd.precision>0.8?'good':fd.precision>0.6?'warn':'bad')}"><div class="v">${pctv(fd.precision)}</div><div class="k">故障机器精确率</div></div>
+      <div class="kpi good"><div class="v">${pctv(e.cause_accuracy)}</div><div class="k">根因归因准确率</div></div>
       <div class="kpi ${o.n_upstream_incidents?'warn':'good'}"><div class="v">${o.n_upstream_incidents}</div><div class="k">识别出的上游故障</div></div>
       <div class="kpi ${o.n_network_incidents?'warn':'good'}"><div class="v">${o.n_network_incidents}</div><div class="k">识别出的网络故障</div></div>
       <div class="kpi"><div class="v">${fmt(e.n_false_negative,0)}</div><div class="k">漏报节点</div></div>
@@ -577,10 +578,10 @@ async function renderEval(){
   el.innerHTML = `
     <div class="banner">分析结论 vs 仿真真值的逐项评测。</div>
     <div class="kpi-row">
-      <div class="kpi good"><div class="v">${fmt(fd.recall*100,1)}%</div><div class="k">召回</div></div>
-      <div class="kpi ${fd.precision>0.8?'good':fd.precision>0.6?'warn':'bad'}"><div class="v">${fmt(fd.precision*100,1)}%</div><div class="k">精确率</div></div>
-      <div class="kpi"><div class="v">${fmt(fd.f1*100,1)}%</div><div class="k">F1</div></div>
-      <div class="kpi good"><div class="v">${fmt(e.cause_accuracy*100,1)}%</div><div class="k">根因准确率</div></div>
+      <div class="kpi good"><div class="v">${pctv(fd.recall)}</div><div class="k">召回</div></div>
+      <div class="kpi ${(fd.precision==null?'':fd.precision>0.8?'good':fd.precision>0.6?'warn':'bad')}"><div class="v">${pctv(fd.precision)}</div><div class="k">精确率</div></div>
+      <div class="kpi"><div class="v">${pctv(fd.f1)}</div><div class="k">F1</div></div>
+      <div class="kpi good"><div class="v">${pctv(e.cause_accuracy)}</div><div class="k">根因准确率</div></div>
       <div class="kpi bad"><div class="v">${fd.fn}</div><div class="k">漏报</div></div>
       <div class="kpi warn"><div class="v">${fd.fp}</div><div class="k">误报</div></div>
     </div>

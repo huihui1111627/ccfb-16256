@@ -61,7 +61,6 @@ def _score(findings: List[Finding], bad_by_file, good_by_file) -> dict:
     for path, bad in bad_by_file.items():
         fl = by_file.get(path, [])
         reported = {f.lineno for f in fl}
-        rule_of = {f.lineno: f.rule for f in fl}
         bad_set = set(bad)
         tp += len(reported & bad_set)
         n_rep += len(reported)

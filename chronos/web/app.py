@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request
 
 from .service import SERVICE
 

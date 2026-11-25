@@ -1,9 +1,8 @@
 """通用小工具: 确定性随机数、稳健统计、时间格式化、区间抽取。"""
 from __future__ import annotations
 
-import math
-from datetime import datetime, timedelta, timezone
-from typing import Iterable, List, Sequence, Tuple
+from datetime import datetime, timezone
+from typing import List, Sequence, Tuple
 
 import numpy as np
 

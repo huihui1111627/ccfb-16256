@@ -29,8 +29,8 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from dataclasses import dataclass
+from typing import List, Tuple
 
 import numpy as np
 
